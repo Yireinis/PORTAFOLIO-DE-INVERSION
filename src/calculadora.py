@@ -9,6 +9,16 @@ class Calculadora:
         return (valor_actual + ingresos - invertido) / invertido
 
     @staticmethod
+    def comision(texto, valor_bruto):
+        """«24262» = pesos; «0,21%» = porcentaje del valor bruto de la operación."""
+        t = (texto or "").strip().replace(" ", "").replace(",", ".")
+        if not t:
+            return 0.0
+        if t.endswith("%"):
+            return valor_bruto * float(t[:-1]) / 100
+        return float(t)
+
+    @staticmethod
     def xirr(flujos):
         """Tasa efectiva anual de flujos fechados [(fecha, monto)] (TIR no periódica).
 

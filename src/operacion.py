@@ -8,8 +8,10 @@ class Operacion:
     fecha: date
     tipo: str          # "compra" | "venta"
     cantidad: float
-    precio: float      # precio por unidad
-    comision: float = 0.0
+    precio: float      # precio por unidad EN PESOS (si fue en dólares: USD × TRM)
+    comision: float = 0.0   # en pesos
+    precio_usd: float = 0.0  # opcional: precio por unidad en dólares
+    trm: float = 0.0         # opcional: TRM usada para convertir a pesos
 
     def valor_bruto(self):
         return self.cantidad * self.precio
@@ -23,9 +25,10 @@ class Operacion:
     def a_dict(self):
         return {"fecha": self.fecha.isoformat(), "tipo": self.tipo,
                 "cantidad": self.cantidad, "precio": self.precio,
-                "comision": self.comision}
+                "comision": self.comision, "precio_usd": self.precio_usd, "trm": self.trm}
 
     @classmethod
     def desde_dict(cls, d):
         return cls(date.fromisoformat(d["fecha"]), d["tipo"], d["cantidad"],
-                   d["precio"], d.get("comision", 0.0))
+                   d["precio"], d.get("comision", 0.0), d.get("precio_usd", 0.0),
+                   d.get("trm", 0.0))
