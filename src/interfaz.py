@@ -4,6 +4,7 @@ from datetime import date
 
 from src.almacenamiento import Almacenamiento
 from src.datos_ejemplo import DatosEjemplo
+from src.calculadora import Calculadora
 from src.importador import Importador
 from src.operacion import Operacion
 from src.pago import Pago
@@ -14,8 +15,22 @@ C = dict(fondo="#F3F5F9", lateral="#14213D", lateral_sel="#22345F", acento="#2A9
 FUENTE = "Segoe UI"
 
 
+def _miles(txt):
+    return txt.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def cop(v):
-    return "$ " + f"{v:,.0f}".replace(",", ".")
+    v = round(v)
+    return ("-" if v < 0 else "") + "$ " + _miles(f"{abs(v):,.0f}")
+
+
+def num2(v):
+    """Número con 2 decimales y formato colombiano (4.548,50)."""
+    return _miles(f"{v:,.2f}")
+
+
+def usd(v):
+    return "US$ " + num2(v)
 
 
 def pct(v):
@@ -43,7 +58,8 @@ class Interfaz(tk.Tk):
         self.cont.pack(side="left", fill="both", expand=True, padx=24, pady=20)
         self.paginas = {
             "Resumen": self._pag_resumen(), "Operaciones": self._pag_operaciones(),
-            "Pagos": self._pag_pagos(), "Activos": self._pag_activos()}
+            "Pagos": self._pag_pagos(), "Activos": self._pag_activos(),
+            "Estado de cuenta": self._pag_libro()}
         self.mostrar("Resumen")
         self.refrescar()
 
@@ -68,7 +84,7 @@ class Interfaz(tk.Tk):
         tk.Label(lat, text="Renta fija y variable", bg=C["lateral"], fg="#9FB0D0",
                  font=(FUENTE, 9)).pack(anchor="w", padx=20, pady=(0, 24))
         self.botones = {}
-        for n in ("Resumen", "Operaciones", "Pagos", "Activos"):
+        for n in ("Resumen", "Operaciones", "Pagos", "Activos", "Estado de cuenta"):
             b = tk.Button(lat, text="   " + n, anchor="w", bd=0, relief="flat",
                           bg=C["lateral"], fg="white", activebackground=C["lateral_sel"],
                           activeforeground="white", font=(FUENTE, 11), cursor="hand2",
@@ -109,7 +125,8 @@ class Interfaz(tk.Tk):
         t = ttk.Treeview(marco, columns=columnas, show="headings", height=8)
         for c, a in zip(columnas, anchos):
             t.heading(c, text=c)
-            t.column(c, width=a, anchor="w" if c in ("Activo", "Tipo", "Fecha", "Categoría") else "e")
+            t.column(c, width=a, minwidth=40,
+                     anchor="w" if c in ("Activo", "Tipo", "Fecha", "Categoría") else "e")
         sb = ttk.Scrollbar(marco, orient="vertical", command=t.yview)
         t.configure(yscrollcommand=sb.set)
         t.pack(side="left", fill="both", expand=True)
@@ -154,7 +171,7 @@ class Interfaz(tk.Tk):
             accion()
         except (ValueError, KeyError) as e:
             msg = str(e)
-            if "convert" in msg or "isoformat" in msg or "Invalid" in msg or not msg:
+            if "could not convert" in msg or "isoformat" in msg or not msg:
                 msg = "Revisa los campos: números sin separador de miles y fechas AAAA-MM-DD."
             messagebox.showerror("Dato no válido", msg)
             return
@@ -219,18 +236,22 @@ class Interfaz(tk.Tk):
         self.o_activo = self._combo(pag, [], 18, estado="normal")   # se puede escribir uno nuevo
         self.o_nuevo = self._combo(pag, ["Acción", "CDT", "Bono", "TES"], 9)
         self.o_nuevo.current(0)
-        self.o_cant = self._entry(pag, "", 10)
-        self.o_precio = self._entry(pag, "", 12)
-        self.o_com = self._entry(pag, "0", 10)
+        self.o_cant = self._entry(pag, "", 8)
+        self.o_precio = self._entry(pag, "", 11)
+        self.o_moneda = self._combo(pag, ["COP", "USD"], 6)
+        self.o_moneda.current(0)
+        self.o_trm = self._entry(pag, "", 9)
+        self.o_com = self._entry(pag, "0", 9)
         f = self._formulario(pag, [("Fecha (AAAA-MM-DD)", self.o_fecha), ("Tipo", self.o_tipo),
             ("Activo (elige o escribe uno nuevo)", self.o_activo), ("Si es nuevo", self.o_nuevo),
             ("Cantidad", self.o_cant),
-            ("Precio por unidad", self.o_precio), ("Comisión", self.o_com),
+            ("Precio por unidad", self.o_precio), ("Moneda", self.o_moneda),
+            ("TRM (si es USD)", self.o_trm), ("Comisión ($ o %)", self.o_com),
             ("", self._boton(pag, "Registrar", self._registrar_operacion))])
         f.pack(fill="x", pady=(0, 12))
-        marco, self.t_ops = self._tabla(pag, ("Fecha", "Activo", "Tipo", "Cantidad", "Precio",
-                                              "Comisión", "Flujo de caja"),
-                                        (100, 150, 80, 90, 110, 100, 130))
+        marco, self.t_ops = self._tabla(pag, ("Fecha", "Activo", "Tipo", "Cantidad", "Precio (COP)",
+                                              "Precio US$", "TRM", "Comisión", "Flujo de caja"),
+                                        (90, 140, 70, 70, 100, 80, 80, 90, 120))
         marco.pack(fill="both", expand=True)
         return pag
 
@@ -241,13 +262,17 @@ class Interfaz(tk.Tk):
         self.p_activo = self._combo(pag, [], 18)
         self.p_tipo = self._combo(pag, ["dividendo", "interes", "capital"], 12)
         self.p_tipo.current(0)
-        self.p_monto = self._entry(pag, "", 14)
+        self.p_monto = self._entry(pag, "", 13)
+        self.p_usd = self._entry(pag, "", 11)
+        self.p_trm = self._entry(pag, "", 9)
         f = self._formulario(pag, [("Fecha (AAAA-MM-DD)", self.p_fecha), ("Activo", self.p_activo),
-            ("Tipo", self.p_tipo), ("Monto recibido", self.p_monto),
+            ("Tipo", self.p_tipo), ("Monto recibido (COP)", self.p_monto),
+            ("o dividendo por acción (US$)", self.p_usd), ("TRM del día", self.p_trm),
             ("", self._boton(pag, "Registrar", self._registrar_pago))])
         f.pack(fill="x", pady=(0, 12))
-        marco, self.t_pagos = self._tabla(pag, ("Fecha", "Activo", "Tipo", "Monto"),
-                                          (110, 200, 120, 140))
+        marco, self.t_pagos = self._tabla(pag, ("Fecha", "Activo", "Tipo", "Acciones", "US$ por acción",
+                                                "TRM", "Monto (COP)"),
+                                          (100, 170, 90, 80, 110, 90, 130))
         marco.pack(fill="both", expand=True)
         return pag
 
@@ -268,9 +293,12 @@ class Interfaz(tk.Tk):
             ("", self._boton(pag, "Crear activo", self._crear_activo))])
         f.pack(fill="x", pady=(0, 8))
         self.v_activo = self._combo(pag, [], 18)
-        self.v_precio = self._entry(pag, "", 14)
-        g = self._formulario(pag, [("Activo", self.v_activo), ("Nuevo precio de mercado (por unidad)",
-            self.v_precio), ("", self._boton(pag, "Actualizar precio", self._actualizar_precio)),
+        self.v_precio = self._entry(pag, "", 12)
+        self.v_moneda = self._combo(pag, ["COP", "USD"], 6)
+        self.v_moneda.current(0)
+        self.v_trm = self._entry(pag, "", 9)
+        g = self._formulario(pag, [("Activo", self.v_activo), ("Precio actual por unidad",
+            self.v_precio), ("Moneda", self.v_moneda), ("TRM (si es USD)", self.v_trm), ("", self._boton(pag, "Actualizar precio", self._actualizar_precio)),
             ("", self._boton(pag, "Eliminar activo", self._eliminar_activo))])
         g.pack(fill="x", pady=(0, 12))
         marco, self.t_act = self._tabla(pag, ("Activo", "Tipo", "Categoría", "Cantidad",
@@ -279,12 +307,58 @@ class Interfaz(tk.Tk):
         marco.pack(fill="both", expand=True)
         return pag
 
+    def _pag_libro(self):
+        pag = tk.Frame(self.cont, bg=C["fondo"])
+        self._titulo(pag, "Estado de cuenta",
+                     "Movimientos de un activo con el saldo acumulado, como en la hoja de cálculo")
+        self.l_activo = self._combo(pag, [], 24)
+        self.l_activo.bind("<<ComboboxSelected>>", lambda e: self._llenar_libro())
+        self._formulario(pag, [("Activo", self.l_activo)]).pack(fill="x", pady=(0, 10))
+        self.l_resumen = tk.Label(pag, text="", bg=C["fondo"], fg=C["texto"], justify="left",
+                                  font=(FUENTE, 11, "bold"))
+        self.l_resumen.pack(anchor="w", pady=(0, 8))
+        marco, self.t_libro = self._tabla(pag, (
+            "Fecha", "Acciones", "Valor US", "Valor COP", "Compra", "Venta", "TRM",
+            "Dividendo US", "Dividendo COP", "Dividendos", "Comisión", "Saldo", "Variación",
+            "Total"), (80, 52, 70, 84, 46, 46, 66, 76, 82, 80, 70, 96, 70, 90))
+        marco.pack(fill="both", expand=True)
+        return pag
+
+    def _llenar_libro(self):
+        nombre = self.l_activo.get()
+        if nombre not in self.p.activos:
+            self._llenar(self.t_libro, [])
+            self.l_resumen.config(text="Registra operaciones para ver el estado de cuenta.")
+            return
+        a, hoy = self.p.activos[nombre], date.today()
+        vacio = lambda v, f: "—" if v is None else f(v)
+        qty = lambda v: f"{v:g}" if v else ""
+        filas = a.libro()
+        self._llenar(self.t_libro, [(
+            f["fecha"].isoformat(), f"{f['acciones']:g}", vacio(f["valor_usd"], usd),
+            vacio(f["valor_cop"], lambda v: "$ " + num2(v)), qty(f["compra"]), qty(f["venta"]),
+            vacio(f["trm"], lambda v: "$ " + num2(v)), vacio(f["div_usd"], usd),
+            vacio(f["div_cop"], lambda v: "$ " + num2(v)),
+            cop(f["dividendos"]) if f["dividendos"] else "", cop(f["comision"]) if f["comision"] else "",
+            cop(f["saldo"]), vacio(f["variacion"], variacion), cop(f["total"])) for f in filas])
+        saldo = filas[-1]["saldo"] if filas else 0
+        self.l_resumen.config(text=(
+            f"Saldo: {cop(saldo)}   ·   Resultado total: {cop(a.ganancia(hoy))}   ·   "
+            f"Rentabilidad acumulada: {variacion(a.rentabilidad_acumulada(hoy))}   ·   "
+            f"E. A.: {variacion(a.rentabilidad_ea(hoy))}"))
+
     # ---------------- acciones ----------------
     def _registrar_operacion(self):
         def hacer():
-            op = Operacion(self._fecha(self.o_fecha.get()), self.o_tipo.get(),
-                           self._num(self.o_cant.get()), self._num(self.o_precio.get()),
-                           self._num(self.o_com.get() or "0"))
+            cantidad, precio = self._num(self.o_cant.get()), self._num(self.o_precio.get())
+            en_usd = self.o_moneda.get() == "USD"
+            trm = self._num(self.o_trm.get()) if self.o_trm.get().strip() else 0.0
+            if en_usd and trm <= 0:
+                raise ValueError("Escribe la TRM para convertir de dólares a pesos.")
+            precio_cop = precio * trm if en_usd else precio
+            op = Operacion(self._fecha(self.o_fecha.get()), self.o_tipo.get(), cantidad,
+                           precio_cop, Calculadora.comision(self.o_com.get(), cantidad * precio_cop),
+                           precio if en_usd else 0.0, trm if en_usd else 0.0)
             nombre = self.o_activo.get().strip()
             if not nombre:
                 raise ValueError("Escribe o elige el activo.")
@@ -307,10 +381,19 @@ class Interfaz(tk.Tk):
 
     def _registrar_pago(self):
         def hacer():
-            self.p.registrar_pago(self.p_activo.get(), Pago(
-                self._fecha(self.p_fecha.get()), self.p_tipo.get(),
-                self._num(self.p_monto.get())))
-            self.p_monto.delete(0, "end")
+            fecha, nombre, tipo = (self._fecha(self.p_fecha.get()), self.p_activo.get(),
+                                   self.p_tipo.get())
+            if self.p_usd.get().strip():
+                if tipo != "dividendo":
+                    raise ValueError("El valor en dólares por acción solo aplica a dividendos.")
+                if not self.p_trm.get().strip():
+                    raise ValueError("Escribe la TRM del día del pago.")
+                self.p.registrar_dividendo_usd(nombre, fecha, self._num(self.p_usd.get()),
+                                               self._num(self.p_trm.get()))
+            else:
+                self.p.registrar_pago(nombre, Pago(fecha, tipo, self._num(self.p_monto.get())))
+            for e in (self.p_monto, self.p_usd, self.p_trm):
+                e.delete(0, "end")
         self._guardar(hacer)
 
     def _crear_activo(self):
@@ -336,7 +419,12 @@ class Interfaz(tk.Tk):
             nombre = self.v_activo.get()
             if nombre in self.p.activos and self.p.activos[nombre].tipo == "CDT":
                 raise ValueError("El CDT se valora por los intereses causados, no por precio.")
-            self.p.actualizar_precio(nombre, self._num(self.v_precio.get()))
+            precio = self._num(self.v_precio.get())
+            if self.v_moneda.get() == "USD":
+                if not self.v_trm.get().strip():
+                    raise ValueError("Escribe la TRM para convertir de dólares a pesos.")
+                precio *= self._num(self.v_trm.get())
+            self.p.actualizar_precio(nombre, precio)
             self.v_precio.delete(0, "end")
         self._guardar(hacer)
 
@@ -397,8 +485,10 @@ class Interfaz(tk.Tk):
         self.acciones["ejemplo"].config(text="Quitar datos de ejemplo" if self.p.hay_ejemplo()
                                         else "Cargar datos de ejemplo")
         nombres = list(self.p.activos)
-        for c in (self.o_activo, self.p_activo, self.v_activo):
+        for c in (self.o_activo, self.p_activo, self.v_activo, self.l_activo):
             c.configure(values=nombres)
+        if self.l_activo.get() not in nombres:
+            self.l_activo.set(nombres[0] if nombres else "")
         r = self.p.resumen(hoy)
         self.kpi["invertido"].config(text=cop(r["invertido"]))
         self.kpi["valor_actual"].config(text=cop(r["valor_actual"]))
@@ -422,14 +512,19 @@ class Interfaz(tk.Tk):
         ops = sorted(((o, a.nombre) for a in self.p.activos.values() for o in a.operaciones),
                      key=lambda x: x[0].fecha, reverse=True)
         self._llenar(self.t_ops, [(o.fecha.isoformat(), n, o.tipo, f"{o.cantidad:g}",
-                     cop(o.precio), cop(o.comision), cop(o.flujo_caja())) for o, n in ops])
+                     cop(o.precio), usd(o.precio_usd) if o.precio_usd else "—",
+                     "$ " + num2(o.trm) if o.trm else "—", cop(o.comision),
+                     cop(o.flujo_caja())) for o, n in ops])
         pagos = sorted(((x, a.nombre) for a in self.p.activos.values() for x in a.pagos),
                        key=lambda x: x[0].fecha, reverse=True)
-        self._llenar(self.t_pagos, [(x.fecha.isoformat(), n, x.tipo, cop(x.monto))
-                                    for x, n in pagos])
+        self._llenar(self.t_pagos, [(x.fecha.isoformat(), n, x.tipo,
+                     f"{x.acciones:g}" if x.acciones else "—",
+                     usd(x.usd_por_accion) if x.usd_por_accion else "—",
+                     "$ " + num2(x.trm) if x.trm else "—", cop(x.monto)) for x, n in pagos])
         self._llenar(self.t_act, [(a.nombre, a.tipo, a.categoria, f"{a.cantidad():g}",
                      "—" if a.tipo == "CDT" else cop(a.precio_mercado), cop(a.valor_actual(hoy)))
                      for a in self.p.activos.values()])
+        self._llenar_libro()
 
     @staticmethod
     def _llenar(tabla, filas):
