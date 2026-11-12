@@ -1,5 +1,9 @@
 from datetime import date
 
+from src.calculadora import Calculadora
+from src.operacion import Operacion
+from src.pago import Pago
+
 
 class Activo:
     """Clase base de cualquier instrumento del portafolio."""
@@ -24,6 +28,20 @@ class Activo:
         if op.tipo == "venta" and op.cantidad > self.cantidad() + 1e-9:
             raise ValueError("No puedes vender más de lo que tienes.")
         self.operaciones.append(op)
+        # primera valoración: sin precio de mercado se valora al precio de compra
+        if (op.tipo == "compra" and self.tipo != "CDT" and self.precio_mercado == 0
+                and not self.historial):
+            self.actualizar_precio(op.precio, op.fecha)
+
+    def dividendo_usd(self, fecha, usd_por_accion, trm):
+        """Dividendo = acciones que tenías ese día × dólares por acción × TRM."""
+        acciones = self.cantidad(fecha)
+        if acciones <= 0:
+            raise ValueError("No tenías acciones de este activo en esa fecha.")
+        if usd_por_accion <= 0 or trm <= 0:
+            raise ValueError("El dividendo en dólares y la TRM deben ser mayores que cero.")
+        return Pago(fecha, "dividendo", acciones * usd_por_accion * trm,
+                    usd_por_accion, trm, acciones)
 
     def registrar_pago(self, pago):
         if pago.tipo not in self.pagos_validos:
@@ -84,6 +102,49 @@ class Activo:
     def ganancia(self, hoy=None):
         return (self.valor_actual(hoy) + self.ingresos_ventas() + self.total_pagos()
                 - self.total_invertido())
+
+    def rentabilidad_acumulada(self, hoy=None):
+        return Calculadora.rentabilidad_acumulada(
+            self.total_invertido(), self.valor_actual(hoy),
+            self.ingresos_ventas() + self.total_pagos())
+
+    def rentabilidad_ea(self, hoy=None):
+        hoy = hoy or date.today()
+        return Calculadora.xirr(self.flujos() + [(hoy, self.valor_actual(hoy))])
+
+    def libro(self):
+        """Estado de cuenta: una fila por movimiento, con el saldo acumulado en pesos.
+
+        acciones = las que tenías ANTES del movimiento; saldo = flujo de dinero acumulado;
+        total = saldo + valor de lo que sigues teniendo; variacion = total / invertido.
+        """
+        eventos = sorted([(o.fecha, 0, o) for o in self.operaciones]
+                         + [(p.fecha, 1, p) for p in self.pagos], key=lambda e: (e[0], e[1]))
+        filas, acciones, saldo, invertido = [], 0.0, 0.0, 0.0
+        for fecha, _, e in eventos:
+            f = {"fecha": fecha, "acciones": acciones, "valor_usd": None, "valor_cop": None,
+                 "compra": 0.0, "venta": 0.0, "trm": None, "div_usd": None, "div_cop": None,
+                 "dividendos": 0.0, "comision": 0.0}
+            if isinstance(e, Operacion):
+                es_compra = e.tipo == "compra"
+                acciones += e.cantidad if es_compra else -e.cantidad
+                saldo += e.flujo_caja()
+                if es_compra:
+                    invertido += e.valor_bruto() + e.comision
+                f.update(valor_usd=e.precio_usd or None, valor_cop=e.precio,
+                         compra=e.cantidad if es_compra else 0.0,
+                         venta=0.0 if es_compra else e.cantidad,
+                         trm=e.trm or None, comision=e.comision)
+            else:
+                saldo += e.monto
+                f.update(trm=e.trm or None, div_usd=e.usd_por_accion or None,
+                         div_cop=e.monto / acciones if acciones > 0 else None,
+                         dividendos=e.monto)
+            f["saldo"] = saldo
+            f["total"] = saldo + self.valor_actual(fecha)
+            f["variacion"] = f["total"] / invertido if invertido else None
+            filas.append(f)
+        return filas
 
     def flujos(self):
         """Flujos de dinero reales (sin el valor actual)."""

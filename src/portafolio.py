@@ -33,15 +33,17 @@ class Portafolio:
         return self.activos[nombre]
 
     def registrar_operacion(self, nombre, operacion):
-        activo = self._activo(nombre)
-        activo.registrar_operacion(operacion)
-        # primera valoración: sin precio de mercado se valora al precio de compra
-        if (operacion.tipo == "compra" and activo.tipo != "CDT"
-                and activo.precio_mercado == 0 and not activo.historial):
-            activo.actualizar_precio(operacion.precio, operacion.fecha)
+        self._activo(nombre).registrar_operacion(operacion)
 
     def registrar_pago(self, nombre, pago):
         self._activo(nombre).registrar_pago(pago)
+
+    def registrar_dividendo_usd(self, nombre, fecha, usd_por_accion, trm):
+        activo = self._activo(nombre)
+        activo.registrar_pago(activo.dividendo_usd(fecha, usd_por_accion, trm))
+
+    def libro(self, nombre):
+        return self._activo(nombre).libro()
 
     def actualizar_precio(self, nombre, precio):
         self._activo(nombre).actualizar_precio(precio)
