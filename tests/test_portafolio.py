@@ -67,8 +67,8 @@ class TestRentabilidad(unittest.TestCase):
         ruta = os.path.join(tempfile.mkdtemp(), "p.csv")
         Importador.plantilla(ruta)
         p = Portafolio()
-        self.assertEqual(Importador.desde_csv(p, ruta), 6)
-        self.assertEqual(set(p.activos), {"ECOPETROL", "CDT Davivienda", "TES 2030"})
+        self.assertEqual(Importador.desde_csv(p, ruta), 10)
+        self.assertEqual(set(p.activos), {"ECOPETROL", "CDT Davivienda", "TES 2030", "NIKE (NKE)"})
         self.assertEqual(p.activos["ECOPETROL"].precio_mercado, 2480)
         self.assertGreater(p.valor_actual(date(2026, 11, 4)), 0)
 
@@ -102,6 +102,32 @@ class TestRentabilidad(unittest.TestCase):
         self.assertEqual(p.valor_actual(date(2026, 2, 1)), 1000)
         p.actualizar_precio("NUEVA", 120)
         self.assertEqual(p.activos["NUEVA"].precio_mercado, 120)
+
+    def test_caso_nike_de_la_hoja_del_profesor(self):
+        """Compra 20 NKE a US$127 (TRM 4.548,5), 2 dividendos de US$0,34 y venta a US$110."""
+        from src.calculadora import Calculadora
+        p = Portafolio(); p.agregar_activo(Accion("NKE"))
+        compra = 20 * 127 * 4548.5
+        p.registrar_operacion("NKE", Operacion(date(2023, 1, 30), "compra", 20, 127 * 4548.5,
+                              Calculadora.comision("0,21%", compra), 127, 4548.5))
+        p.registrar_dividendo_usd("NKE", date(2023, 4, 2), 0.34, 4646.08)
+        p.registrar_dividendo_usd("NKE", date(2023, 6, 1), 0.34, 4177.58)
+        p.registrar_operacion("NKE", Operacion(date(2023, 6, 22), "venta", 20, 110 * 3971.38, 0,
+                              110, 3971.38))
+        filas = p.libro("NKE")
+        self.assertEqual([round(f["saldo"]) for f in filas],
+                         [-11577452, -11545858, -11517451, -2780415])   # = hoja del profesor
+        self.assertEqual([f["acciones"] for f in filas], [0, 20, 20, 20])
+        self.assertEqual(round(filas[1]["div_cop"], 2), 1579.67)
+        a = p.activos["NKE"]
+        self.assertAlmostEqual(a.ganancia(date(2023, 7, 1)), filas[-1]["saldo"], places=4)
+        self.assertAlmostEqual(filas[-1]["variacion"], -2780414.81 / 11577451.70, places=5)
+        self.assertEqual(Calculadora.comision("24262", 1), 24262)
+
+    def test_dividendo_sin_acciones_falla(self):
+        p = Portafolio(); p.agregar_activo(Accion("X"))
+        with self.assertRaises(ValueError):
+            p.registrar_dividendo_usd("X", date(2026, 1, 1), 0.3, 4000)
 
 
 if __name__ == "__main__":
